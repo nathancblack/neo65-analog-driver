@@ -1,9 +1,14 @@
 # Neo65 Sonic HE+ Analog Input Driver
 
-> Handoff brief for a fresh Claude Code session. This file is self-contained.
-> Read it top to bottom before writing any code. The owner (Nathan) has already
-> done the scoping below with a previous Claude session; your job is to execute
-> the plan, starting at **Phase 0 recon**, and to respect the go/no-go gate.
+> **Original scoping brief** (kept intact for rationale + architecture). This is
+> NOT the current status. For where the project actually stands, read **`HANDOFF.md`
+> first**, then **`PROTOCOL.md`**. Quick version below.
+
+> **📍 PROGRESS as of 2026-05-30:** Phases **0, 1, 2 are DONE and verified on
+> hardware.** The go/no-go gate **PASSED** — the board streams plaintext, on-demand
+> per-key analog depth over a QMK raw-HID channel (`d0 a6` opcode). `tools/reader.py`
+> reads independent W/A/S/D depth live. **Next up: Phase 3 (uinput virtual gamepad).**
+> The "Alternative architectures" escape hatches were NOT needed.
 
 ---
 
