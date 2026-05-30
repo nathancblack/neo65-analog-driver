@@ -1,13 +1,14 @@
 # Neo65 Sonic HE+ — Analog Depth HID Protocol
 
 **Status:** Phase 0 **GO** · Phase 1 (decode) **DONE** · Phase 2 (Linux reader)
-**DONE + VERIFIED LIVE 2026-05-30.** Make-or-break **RESOLVED: per-key live depth
-IS reachable.** `d0 ad` is an aggregate dead-end, BUT a NeoFlux full-matrix-view
-sniff revealed **`d0 a6 <startIndex> <count>` — a paginated live per-key depth
-array.** W/A/S/D each drive distinct fixed indices; `tools/reader.py` reads all
-four independently and proportional bars were confirmed live on hardware.
-**Next: Phase 3 — uinput virtual gamepad.** See
-[Per-key depth map](#per-key-depth-map--d0-a6-the-real-channel) and `HANDOFF.md`.
+**DONE + VERIFIED LIVE** · Phase 3 (Linux uinput gamepad) **DONE + VERIFIED LIVE**
+· Phase 4 (Windows ViGEm) **IN PROGRESS** (Rust core ported + Linux-verified;
+only the Windows output backend remains). Make-or-break **RESOLVED: per-key live
+depth IS reachable.** `d0 ad` is an aggregate dead-end, BUT a NeoFlux
+full-matrix-view sniff revealed **`d0 a6 <startIndex> <count>` — a paginated live
+per-key depth array.** W/A/S/D each drive distinct fixed indices.
+**Next: Phase 4 — add the Windows ViGEm backend (see `HANDOFF.md`).** See also
+[Per-key depth map](#per-key-depth-map--d0-a6-the-real-channel).
 
 This file is the living protocol record. `HANDOFF.md` is the start-here for a
 fresh session; read it first, then this.
@@ -107,12 +108,19 @@ prints live bars. Auto-finds the channel by report-descriptor usage page `0xFF60
 (robust to hidraw renumbering). **Confirmed on hardware:** bars track press depth
 proportionally and W/A/S/D move independently (diagonals work). Run: `python tools/reader.py`.
 
-### NEXT (Phase 3): uinput virtual gamepad
-Feed the four normalized depths into a uinput joystick: W/S → Y axis, A/D → X axis,
-with a small rest deadzone, a response curve (linear first, then mild expo), and
-SOCD handling for opposing keys. Verify with `evtest`/`jstest` or a gamepad tester.
-The reader's decode + channel-discovery code is the reusable core; only the output
-shim is new. See `HANDOFF.md` for the concrete starting steps.
+### Phase 3 (uinput virtual gamepad) ✅ DONE + VERIFIED LIVE
+`tools/gamepad.py` (pure-Python uinput) feeds the four normalized depths into a
+virtual pad's left stick: `Y = shape(S)-shape(W)`, `X = shape(D)-shape(A)`, with a
+rest deadzone, optional expo, and subtractive SOCD. Confirmed live by the owner
+(W/A/S/D move the stick proportionally and independently; `tools/jsmon.py` shows
+the kernel-level axes). The decode + channel-discovery core lives in `neo_core.py`.
+
+### Phase 4 (Windows ViGEm) 🚧 IN PROGRESS — Rust core done
+The Phase 3 logic is ported to the Rust crate **`neo-pad/`** with a cross-platform
+`hidapi` read core (`src/protocol.rs`) and a swappable `Pad` trait (`src/pad.rs`);
+the Linux uinput backend is verified. **Remaining: add the `#[cfg(windows)]`
+`vigem-client` backend** — see `HANDOFF.md` "NEXT: Phase 4" for the exact steps.
+The protocol/transport below is identical on Windows (hidapi handles the I/O).
 
 ## Open question — independent key reads  ✅ RESOLVED (was ⛔ MAKE-OR-BREAK)
 

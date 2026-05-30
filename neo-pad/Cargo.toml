@@ -1,0 +1,16 @@
+[package]
+name = "neo-pad"
+version = "0.1.0"
+edition = "2021"
+description = "Neo65 HE analog key-depth -> virtual gamepad stick (Phase 4 Rust port)"
+
+[dependencies]
+hidapi = "2"
+
+# uinput output shim is Linux-only; the Windows ViGEm shim (Phase 4) will add
+# vigem-client under a cfg(windows) block here. The hidapi read core is shared.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 2

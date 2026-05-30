@@ -4,11 +4,15 @@
 > NOT the current status. For where the project actually stands, read **`HANDOFF.md`
 > first**, then **`PROTOCOL.md`**. Quick version below.
 
-> **📍 PROGRESS as of 2026-05-30:** Phases **0, 1, 2 are DONE and verified on
+> **📍 PROGRESS as of 2026-05-30:** Phases **0, 1, 2, 3 are DONE and verified on
 > hardware.** The go/no-go gate **PASSED** — the board streams plaintext, on-demand
 > per-key analog depth over a QMK raw-HID channel (`d0 a6` opcode). `tools/reader.py`
-> reads independent W/A/S/D depth live. **Next up: Phase 3 (uinput virtual gamepad).**
-> The "Alternative architectures" escape hatches were NOT needed.
+> reads independent W/A/S/D depth live; `tools/gamepad.py` drives a Linux uinput
+> virtual gamepad stick from key depth (confirmed live). The driver is now **ported
+> to Rust** (`neo-pad/`, hidapi read core + swappable output trait; Linux backend
+> verified). **Next up: Phase 4 — add the Windows ViGEm output backend** (the chosen
+> path is the Rust crate per §5; only the OS-specific output shim remains). The
+> "Alternative architectures" escape hatches were NOT needed.
 
 ---
 
