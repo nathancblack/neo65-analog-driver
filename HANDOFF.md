@@ -19,9 +19,18 @@ way a Wooting board does natively.
 | 0 | Recon / go-no-go gate | ✅ **PASSED** — board streams plaintext on-demand per-key depth |
 | 1 | Decode the HID protocol | ✅ **DONE** — `d0 a6` per-key map fully decoded |
 | 2 | Linux reader | ✅ **DONE + VERIFIED LIVE** — `tools/reader.py` reads independent W/A/S/D |
-| 3 | **Linux virtual gamepad (uinput)** | ⏭️ **NEXT — start here** |
-| 4 | Windows port (ViGEm) | not started |
+| 3 | Linux virtual gamepad (uinput) | ✅ **DONE — uinput path verified; pending human live WASD test** |
+| 4 | **Windows port (ViGEm)** | ⏭️ **NEXT — start here** |
 | 5 | Per-game tuning | not started |
+
+**Phase 3 result:** `tools/gamepad.py` presents a pure-Python uinput Xbox-style
+pad (no third-party deps — this box has no pip and Python 3.14) whose **left stick
+follows W/A/S/D depth**. Verified that the virtual device enumerates as a 6-axis
+gamepad and that emitted axis values read back exactly through the kernel event
+node (cross-process, via `tools/jsmon.py`). **Not yet done:** a human pressing the
+physical keys and watching the stick — see "Verify" below. Mapping:
+`X = shape(D) − shape(A)`, `Y = shape(S) − shape(W)`, with rest deadzone + optional
+expo; opposing keys cancel (subtractive SOCD).
 
 The earlier "fatal aggregate-only" scare (the `d0 ad` opcode returns only the
 single deepest key) was **resolved**: a different opcode, `d0 a6`, is a true
@@ -50,36 +59,43 @@ per-key array. Escape hatches (custom firmware / Wooting plugin) were NOT needed
    unsafe-by-default — leave them unused. Reading `d0 a6` is safe and is all Phase 3 needs.
 
 ## What's built (`tools/`)
-- **`reader.py`** ⭐ — Phase 2 reader. `python tools/reader.py [secs]`. Auto-finds the
-  channel, polls the 2 WASD pages, prints live normalized bars. **Its decode +
-  channel-discovery code is the reusable core for Phase 3** — don't rewrite it.
+- **`neo_core.py`** ⭐ — the reusable core (extracted from reader.py in Phase 3):
+  `find_channel()`/`open_channel()`, the paginated `d0 a6` read (`read_page`,
+  `read_depths`), `norm()`, and the WASD index/calibration constants. Both
+  `reader.py` and `gamepad.py` import it. Only issues the safe `d0 a6` read.
+- **`gamepad.py`** ⭐ — Phase 3 driver. `python tools/gamepad.py [--monitor] [--expo E]
+  [--deadzone D] [--rate HZ]`. Pure-Python uinput pad; left stick = WASD depth.
+- **`jsmon.py`** — OS-level axis monitor (no evtest/jstest on this box). Finds the
+  virtual pad by name and prints live kernel ABS_X/Y. **Match "Analog Pad", NOT
+  "Neo65"** — the physical keyboard exposes several "NEO Neo65 HE …" nodes that
+  carry no axes.
+- **`reader.py`** — Phase 2 reader. `python tools/reader.py [secs]`. Live normalized
+  WASD bars. Now a thin CLI over `neo_core.py`.
 - **`sniff2.js`** — DevTools sniffer (collapses HID traffic by opcode signature so
   live depth doesn't flood). `neoSummary()` / `neoSave()`. This is what found `d0 a6`.
 - **`probe.py`** — active driver. Useful mode: `keymap [secs] [thr]` (map keys→indices).
 - **`cap.py`** — passive hidraw logger (needs something else polling the board).
 
-## NEXT: Phase 3 — uinput virtual gamepad
+## NEXT: Phase 4 — Windows port (ViGEm)
 
-Goal: present a virtual Xbox-style pad on Linux whose stick axes follow key depth.
+Phase 3 is built and the uinput path is verified; the Linux PoC is in `gamepad.py`.
+Before moving on, do the **human live test** (below) to confirm physical W/A/S/D
+drives the stick smoothly and tune `--deadzone`/`--expo` to taste.
 
-Concrete starting steps:
-1. **Pick the binding.** Python `python-uinput` or `evdev`/`uinput` is fine for a
-   Linux PoC (the brief's long-term lang is Rust w/ `hidapi`+`uinput`+`vigem-client`,
-   but match the existing Python tools for Phase 3 speed; port to Rust later if desired).
-2. **Reuse `reader.py`'s core**: `find_channel()`, the 2-page `d0 a6` read, and `norm()`.
-   Factor those into something importable rather than copy-paste if it's clean.
-3. **Create a uinput joystick** with ABS_X and ABS_Y axes (range e.g. -32768..32767).
-4. **Map:** `Y = norm(S) - norm(W)` (or invert to taste), `X = norm(D) - norm(A)`.
-   Add a small **rest deadzone**, then a response **curve** (linear first, then mild
-   expo). Handle opposing keys (SOCD: last-input-wins or neutral).
-5. **Verify** with `evtest` / `jstest` / `jstest-gtk`, or an online gamepad tester,
-   or a Linux game. Watch for smooth proportional axis travel, independent X/Y.
-6. Once smooth on Linux → **Phase 4**: swap the uinput shim for a ViGEm Xbox-360 pad
-   on Windows (pin ViGEmBus 1.22.0; `vigem-client` Rust crate). Core stays unchanged.
+For Windows: swap only the output shim — keep `neo_core.py`'s channel discovery,
+`d0 a6` read, and `norm()` unchanged.
+1. **Output shim:** ViGEm Xbox-360 pad (pin **ViGEmBus 1.22.0**). If staying in
+   Python, `vgamepad`; if porting to the brief's Rust target, `vigem-client` +
+   `hidapi`. Map the same `X = shape(D)-shape(A)`, `Y = shape(S)-shape(W)`.
+2. **Channel discovery on Windows:** the 0xFF60-usage-page lookup is Linux-sysfs
+   specific — replace `find_channel()` with `hidapi` enumeration filtering on
+   VID:PID `0xE560:0xEE65` + usage page `0xFF60`. The transport (32-byte reports,
+   leading report-id byte, request/response) is the same.
+3. **Verify** with the Windows "Game Controllers" (joy.cpl) applet or Steam Input.
 
-### Open considerations for Phase 3+
-- **Poll rate / latency:** `reader.py` sleeps 5 ms/loop; tune for responsiveness vs CPU.
-  Each frame = 2 USB request/response round-trips.
+### Open considerations for Phase 4+
+- **Poll rate / latency:** `gamepad.py` defaults to a 200 Hz `--rate`; each frame is
+  still 2 USB request/response round-trips (one per WASD page). Tune for feel vs CPU.
 - **Suppressing raw keys:** while the virtual pad is active, the physical W/A/S/D still
   send normal keystrokes to the OS. Some games fight having both keyboard + pad present
   (Wooting documented this). Decide per-game whether to grab/suppress the keys; this is
@@ -87,6 +103,18 @@ Concrete starting steps:
 - **Heartbeat:** NeoFlux sends `d0 b0` ~1/s. `reader.py` works without it; if the channel
   ever stalls during long runs, interleave a `d0 b0` heartbeat.
 
-## Verify the current state in 10 seconds
-`python tools/reader.py` → press W/A/S/D → bars fill proportionally to depth and
-move independently. (Confirmed working 2026-05-30.) Ctrl-C to stop.
+## Verify the current state
+
+**Phase 2 (reader), ~10 s:** `python tools/reader.py` → press W/A/S/D → bars fill
+proportionally and move independently. (Confirmed working 2026-05-30.) Ctrl-C to stop.
+
+**Phase 3 (gamepad), human live test — the one step not yet done headless:**
+two terminals.
+- Terminal A: `python tools/gamepad.py --monitor`  (creates the pad, prints its own X/Y)
+- Terminal B: `python tools/jsmon.py`  (shows what the *kernel* sees — independent check)
+- Press/partially-press W/A/S/D: both should track, stick travel proportional to
+  depth, X and Y independent, opposing keys (A+D / W+S) cancel toward center.
+- Or point any game / online gamepad tester at "Neo65 HE Analog Pad".
+Needs write access to `/dev/uinput` (root, or a group/ACL on the node — the `input`
+group already has it here). Already auto-verified: device enumerates as a 6-axis pad
+and emitted axis values read back exactly via the kernel (`jsmon`, cross-process).
