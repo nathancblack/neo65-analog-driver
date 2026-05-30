@@ -185,11 +185,48 @@ the interface differently than Linux hidraw).
 - **Poll rate / latency:** `gamepad.py` defaults to a 200 Hz `--rate`; each frame is
   still 2 USB request/response round-trips (one per WASD page). Tune for feel vs CPU.
 - **Suppressing raw keys:** while the virtual pad is active, the physical W/A/S/D still
-  send normal keystrokes to the OS. Some games fight having both keyboard + pad present
-  (Wooting documented this). Decide per-game whether to grab/suppress the keys; this is
-  Phase 5 territory but keep it in mind when testing.
+  send normal keystrokes to the OS. **This is the actual make-or-break for in-game feel —
+  see the Phase 5 section below before testing.**
 - **Heartbeat:** NeoFlux sends `d0 b0` ~1/s. `reader.py` works without it; if the channel
   ever stalls during long runs, interleave a `d0 b0` heartbeat.
+
+## Phase 5 — keyboard-vs-controller (the real risk, read before in-game testing)
+
+**The driver was never the hard part; this is.** When you press W, the board
+*unconditionally* sends a **digital W keystroke** over its normal keyboard interface,
+in parallel with our analog stick. If both are bound to "move forward," most games
+**merge them by taking the max / OR-ing**, so the digital W asserts 100% forward the
+instant you cross the actuation point — **saturating movement and masking the analog
+gradation.** Untouched, the likely result is: stick moves fine in a tester, but in-game
+you mostly get full-speed-on-press. You only get analog control in the sliver of travel
+*before* actuation, which is too small to be useful.
+
+**Picking a game that runs keyboard + controller *simultaneously* helps** — it removes
+the worse failure (mode-switching games that flip wholesale to "keyboard mode" on any
+keypress and ignore the stick entirely). With a simultaneous-input game the stick stays
+live; you "just" have to stop the digital keystroke from competing.
+
+**Honest odds:** pad recognized + stick visibly tracking depth → very likely (~85%).
+Satisfying proportional movement with *no* binding changes → coin-flip, probably
+disappointing. Satisfying *after* the mitigations below → likely (~75–80%).
+
+**Mitigations, in order of effort/payoff:**
+1. **Unbind keyboard W/A/S/D movement in the game; bind movement to the controller
+   stick.** If the game has separate keyboard vs controller binds (many do), this alone
+   is probably sufficient. Biggest lever, zero code.
+2. **Raise the actuation point near bottom-out in NeoFlux** so the digital keystroke
+   only fires at ~95% travel, leaving most of the range as pure analog. Cheap, board-side,
+   stacks with #1.
+3. **OS-level key suppression** (last resort, most robust): swallow W/A/S/D before the
+   game sees them — Windows: a low-level keyboard hook or the **Interception** driver;
+   Linux: `EVIOCGRAB` on the keyboard event node. Invasive (loses those keys for anything
+   else while active) and per-OS code, so only if #1/#2 don't get there.
+
+**Test ordering that saves time (do this on Windows):** first prove the stick in
+**`joy.cpl`** — no game logic, no competing keyboard, pure confirmation the pad works.
+*Then* enter the game and immediately check whether keyboard movement can be unbound.
+That sequence tells you fast whether you're debugging our code or fighting the game's
+input merge — don't conflate the two.
 
 ## Verify the current state
 
