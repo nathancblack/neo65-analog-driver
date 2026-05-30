@@ -41,7 +41,11 @@ public surfaces it to games. (confidence 8/10 the data is retrievable on demand)
 - **Wooting Analog SDK** is the standard open driver for analog keyboards, but
   its default plugin talks to **Wooting hardware only**. Its recent "generic
   device handling" covers new *Wooting* devices, not arbitrary vendors. It will
-  not auto-detect the Neo65. (confidence 8/10)
+  not auto-detect the Neo65. (confidence 8/10) **However**, the SDK explicitly
+  supports third-party device *plugins* — so writing a Neo65 plugin is a viable
+  *alternative architecture* that would reuse Wooting's whole game-integration
+  ecosystem instead of building/maintaining our own virtual gamepad. See
+  "Alternative architectures" in section 5.
 - **reWASD / vJoy / Steam Input / JoyToKey** can map keys onto a virtual stick,
   but they only see the digital keypress, so you get full-tilt movement, never
   proportional depth.
@@ -65,7 +69,7 @@ public surfaces it to games. (confidence 8/10 the data is retrievable on demand)
 | Polling rate | 8000 Hz, ~0.125 ms response (marketing figure) | 7/10 |
 | Native analog/gamepad mode | **None advertised** anywhere | 7/10 |
 | Connectivity for analog work | Use **wired**; treat tri-mode wireless as out of scope | 8/10 |
-| MCU model | **UNKNOWN** (one low-quality source claimed RP2040 for the non-HE Neo65; do not trust it). Marketing only says "high-frequency MCU". | 3/10 |
+| MCU model | **Likely RP2040 / RP2350.** Official firmware ships as `neo65he_v1.2.0_20251010.uf2`, and `.uf2` is the UF2 bootloader format used natively by RP2040/RP2350 (and some SAMD chips). Earlier brief distrusted an RP2040 claim, but the firmware format is real evidence for it. Confirm empirically (BOOTSEL drive / chip markings). | 6/10 |
 | Analog value resolution | **UNKNOWN until captured.** Could be 8-bit (0-255) or 10/12-bit little-endian. Determine empirically; do not assume. | n/a |
 
 WebHID is **Chromium-only** (no Firefox). On Arch, install `chromium` or
@@ -91,9 +95,32 @@ udev rule is likely required (see Phase 0).
 - **Output is the only OS-specific part.** Linux: `uinput`. Windows: `ViGEmBus`
   + `ViGEmClient` (emulate an Xbox 360 / XInput pad). Keep this behind a thin
   trait/interface so the core never changes.
+  - **Note (verified 2026):** the ViGEmBus repo is archived / no longer actively
+    developed, but the last stable build (**1.22.0**) still works on Windows 11
+    and is what DS4Windows etc. ship. Not a blocker — pin to 1.22.0 and expect no
+    future updates. The `vigem-client` Rust crate (pure Rust, Windows-only) is
+    confirmed available and is the intended binding.
 - **Recommended language: Rust.** Clean cross-platform story: `hidapi` crate for
   reading, `uinput` crate for Linux output, `vigem-client` crate for Windows
   output. C with hidapi + raw ViGEmClient also works if preferred.
+
+### Alternative architectures (keep in back pocket; do NOT start here)
+
+The one way this plan could waste time is tunnel-visioning on "read HID depth ->
+own virtual gamepad" if it hits a wall. Escape hatches, in rough order of
+preference:
+
+1. **Wooting Analog SDK plugin.** Write a Neo65 device plugin against the SDK
+   (Rust, supported extension point) and inherit its game integrations and
+   virtual-pad tooling instead of maintaining our own. Best fallback if the raw
+   capture works but the output/per-game layer gets painful.
+2. **Custom firmware (only because MCU is likely RP2040/RP2350 — see section 4).**
+   Firmware that natively emits a gamepad HID descriptor would delete the entire
+   userspace reader + ViGEm layer. Higher risk: brick potential, loses NeoFlux
+   features, and likely no existing QMK/HE support for this exact board. A last
+   resort, not a starting point.
+3. **`hid-recorder` (hidutils) on Linux** as a second, independent capture method
+   alongside the WebHID sniffer — useful to cross-check the protocol decode.
 
 ## 6. Plan (phased, with the gate)
 
@@ -116,6 +143,13 @@ the stream is encrypted/obfuscated, **stop and reassess** rather than grinding.
 (Plaintext-ish protocol expected, confidence 8/10. WebHID makes any init
 handshake fully visible, which is the big advantage over sniffing a binary.)
 
+**Caveat (verified 2026):** the existence of a *live, sustained* analog
+visualization in NeoFlux could NOT be independently confirmed from reviews —
+they describe per-key actuation tuning, not a real-time travel graph. So
+"depth streams on demand" remains genuinely unverified until this capture. This
+is the single highest-leverage unknown in the whole project; settle it here,
+cheaply, before writing any reader code.
+
 ### Phase 1 — Decode the protocol
 From the dump, establish: the device **VID:PID**, the **report ID** carrying the
 analog stream, whether data arrives as async **input reports** or via
@@ -123,6 +157,14 @@ analog stream, whether data arrives as async **input reports** or via
 NeoFlux sends before data flows, the **byte offset(s)** that move for W vs A
 (reveals per-key indexing), and the **value range + endianness**. Document all
 of this in a `PROTOCOL.md`.
+
+**Gotcha — target the right HID interface.** HE keyboards almost always expose
+config/analog data on a *separate vendor-defined HID interface (usage page)*,
+distinct from the standard keyboard interface. The reader must open that vendor
+interface, not the keyboard one. Note which interface/usage page the WebHID
+sniffer attaches to and match it in the hidapi reader. (Also: WebHID blocks
+protected top-level collections like generic keyboard/mouse, so the fact the
+configurator can talk to it at all confirms a separate non-protected collection.)
 
 ### Phase 2 — Linux reader
 Open the device via hidapi, replay the init/poll exactly as captured, and print
