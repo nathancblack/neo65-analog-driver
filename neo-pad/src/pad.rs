@@ -19,11 +19,16 @@ pub fn new_pad() -> io::Result<Box<dyn Pad>> {
     )?))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub fn new_pad() -> io::Result<Box<dyn Pad>> {
+    Ok(Box::new(win_vigem::VigemPad::new()?))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn new_pad() -> io::Result<Box<dyn Pad>> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "no Pad backend for this OS yet (Phase 4: add a cfg(windows) ViGEm shim)",
+        "no Pad backend for this OS (only Linux uinput + Windows ViGEm are implemented)",
     ))
 }
 
@@ -199,6 +204,60 @@ mod linux_uinput {
         fn drop(&mut self) {
             self.set_left_stick(0.0, 0.0); // recenter before teardown
             let _ = xioctl(self.file.as_raw_fd(), UI_DEV_DESTROY, 0);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod win_vigem {
+    //! Windows backend: emulate a wired Xbox 360 pad through ViGEmBus. Requires the
+    //! ViGEmBus driver (pinned to 1.22.0) installed, or `Client::connect()` fails.
+    //! Only the left stick is driven; everything else stays neutral.
+    use super::Pad;
+    use std::io;
+    use vigem_client::{Client, TargetId, XGamepad, Xbox360Wired};
+
+    pub struct VigemPad {
+        target: Xbox360Wired<Client>,
+        gp: XGamepad,
+    }
+
+    impl VigemPad {
+        pub fn new() -> io::Result<Self> {
+            let client = Client::connect().map_err(|e| {
+                io::Error::other(format!(
+                    "ViGEmBus connect failed (is the ViGEmBus 1.22.0 driver installed and running?): {e}"
+                ))
+            })?;
+            let mut target = Xbox360Wired::new(client, TargetId::XBOX360_WIRED);
+            target
+                .plugin()
+                .map_err(|e| io::Error::other(format!("ViGEm plugin: {e}")))?;
+            target
+                .wait_ready()
+                .map_err(|e| io::Error::other(format!("ViGEm wait_ready: {e}")))?;
+            Ok(Self {
+                target,
+                gp: XGamepad::default(),
+            })
+        }
+    }
+
+    impl Pad for VigemPad {
+        fn set_left_stick(&mut self, x: f32, y: f32) {
+            // main.rs supplies x,y in [-1,1] with Y screen-down-positive. XInput
+            // thumb axes are i16 with +Y = up, so negate Y here (the one platform
+            // difference vs the Linux uinput backend, which is ABS down-positive).
+            let s = |v: f32| (v.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+            self.gp.thumb_lx = s(x);
+            self.gp.thumb_ly = s(-y);
+            let _ = self.target.update(&self.gp);
+        }
+    }
+
+    impl Drop for VigemPad {
+        fn drop(&mut self) {
+            self.set_left_stick(0.0, 0.0); // recenter; target unplugs on its own drop
         }
     }
 }

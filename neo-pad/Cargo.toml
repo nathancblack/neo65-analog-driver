@@ -6,11 +6,18 @@ description = "Neo65 HE analog key-depth -> virtual gamepad stick (Phase 4 Rust 
 
 [dependencies]
 hidapi = "2"
+ctrlc = "3"   # cross-platform Ctrl-C handler (replaces the old libc signal call)
 
-# uinput output shim is Linux-only; the Windows ViGEm shim (Phase 4) will add
-# vigem-client under a cfg(windows) block here. The hidapi read core is shared.
+# uinput output shim is Linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+
+# Windows output shim: emulate an Xbox 360 pad via ViGEmBus (pin driver to 1.22.0).
+# The hidapi read core is shared across both platforms.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.34.3", features = ["persistence"] }
+serde = { version = "1", features = ["derive"] }
+vigem-client = "0.1"
 
 [profile.release]
 opt-level = 2
